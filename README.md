@@ -6,9 +6,16 @@
 
 This rock generator was created as a better alternative for Voronoi fracturing polygons. The issue with Voronoi is that it isn't intended to be used for polygons, so you end up with sub-optimal edges. The alternative algorithm I created was to populate and relax a series of triangulation points inside any arbitrary polygon. After triangulation you randomly join the resulting triangles until you get the desired chunk size.
 
-<img width="50%" src="./images/example_summary_1.png" />
-<img width="50%" src="./images/example_summary_2.png" />
-<img width="50%" src="./images/example_summary_3.png" />
+<table>
+<tr>
+<td><img width="50%" src="./images/example_summary_1.png" /></td>
+<td><img width="50%" src="./images/example_summary_2.png" /></td>
+</tr>
+<tr>
+<td><img width="50%" src="./images/example_summary_3.png" /></td>
+<td><img width="50%" src="./images/example_summary_4.png" /></td>
+</tr>
+</table>
 
 ## Instructions
 
