@@ -10,8 +10,8 @@ export default class App {
 
     static async #init() {
         const [rocks, texture] = await Promise.all([
-            new GLTFLoader().loadAsync('../rocks.glb'),
-            new THREE.TextureLoader().loadAsync('../texture.png'),
+            new GLTFLoader().loadAsync('./rocks.glb'),
+            new THREE.TextureLoader().loadAsync('./texture.png'),
         ]);
 
         texture.colorSpace = THREE.SRGBColorSpace;
