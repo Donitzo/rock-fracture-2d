@@ -12,52 +12,50 @@ This rock generator was created as a better alternative for Voronoi fracturing p
 
 ## Instructions
 
-To generate your own rocks, configure the `rock_generator.py` python script by editing the constants. After running the script, you'll get a number of summary plots and a combined GLTF model.
+To generate your own rocks, configure the `rock_generator.py` python script by editing the constants in the top of the file. After running the script, you'll get a number of summary plots and a combined GLTF model.
 
 ## GLTF Model
 
+A lot of different metadata are included as both `.JSON` data per rock mesh and stored in vertex buffers.
+
 ### Standard Vertex Attributes
 
-#### POSITION (`vec3`)
+    POSITION (vec3)
 
-* **xy**: Vertex position in rock-local space (around center)
-* **z**: Outline vertex flag if `>= 0.1`
+    xy: Vertex position in rock-local space (around center)
+    z: Outline vertex flag if >= 0.1
 
-#### NORMAL (`vec3`)
+    NORMAL (vec3)
 
-* **xy**: 2D corner normal
-* **z**: Normalized angle around rock (`0-1`)
+    xy: 2D corner normal
+    z: Normalized angle around rock (0-1)
 
-#### UV (`vec2`)
+    UV (vec2)
 
-* **uv**: Centered, normalized, fixed-aspect rock extent
+    uv: Centered, normalized, fixed-aspect rock extent
 
-#### COLOR (`vec4`)
+    COLOR (vec4)
 
-* **r**: Rock radius at vertex (scaled by `0.1`)
-* **g**: Normalized depth from edge
-
-  * `0.0` = edge
-  * `1.0` = center
-* **b**: Quantized triangle index
-
-  * `x / (QUANTIZATION_SCALE - 1.0)`
-* **a**: Quantized chunk index
+    r: Rock radius at vertex (scaled by 0.1)
+    g: Normalized depth from edge (0.0 = edge, 1.0 = center)
+    b: Quantized triangle index
+    a: Quantized chunk index
+      x / (QUANTIZATION_SCALE - 1.0)
 
 ### Custom Vertex Attributes
 
-*(May require a custom importer)*
+(May require a custom importer)
 
-#### `_TRIANGLE_CENTER` (`vec3`)
+    _TRIANGLE_CENTER (vec3)
 
-* **xy**: Center of the triangle this vertex belongs to
-* **z**: Vertex index in triangle (`0-2`)
+    xy: Center of the triangle this vertex belongs to
+    z: Vertex index in triangle (0-2)
 
-#### `_CHUNK_CENTER` (`vec3`)
+    _CHUNK_CENTER (vec3)
 
-* **xy**: Center of the chunk this vertex belongs to
-* **z**: Distance from rock center to chunk center
+    xy: Center of the chunk this vertex belongs to
+    z: Distance from rock center to chunk center
 
 ### Additional Metadata
 
-Additional rock metadata is stored as JSON under the rock node’s `extras` field. This metadata includes chunk centers, graph adjacency, graph depth, chunk visibility.
+Additional rock metadata is stored as JSON under the rock node’s `extras` field (userData in Three.js). This metadata includes chunk centers, graph adjacency, graph depth, chunk visibility.
