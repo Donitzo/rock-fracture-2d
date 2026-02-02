@@ -15,6 +15,10 @@ This rock generator was created as a better alternative for Voronoi fracturing p
 <td><img src="./images/example_summary_3.png" /></td>
 <td><img src="./images/example_summary_4.png" /></td>
 </tr>
+<tr>
+<td><img src="./images/example_summary_5.png" /></td>
+<td><img src="./images/example_summary_6.png" /></td>
+</tr>
 </table>
 
 ## Instructions
