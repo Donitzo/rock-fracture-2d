@@ -32,30 +32,6 @@ CREATE_SUMMARY_PLOTS = True
 # If non-zero, will cut and mark the outer outline as outline triangles
 OUTLINE_THICKNESS = 0.015
 
-# GLTF model
-# Standard Vertex attributes:
-# POSITION (vec3)
-#   xy: vertex position in rock-local space (around center)
-#   z: outline vertex if >= 0.1
-# NORMAL (vec3)
-#   xy: 2D corner normal
-#   z: normalized angle around rock (0–1)
-# UV (vec2)
-#   uv: centered, normalized, fixed aspect rock extent
-# COLOR (vec4)
-#   r: rock radius at vertex (scaled by 0.1)
-#   g: normalized depth from edge (0.0=edge, 1.0=center)
-#   b: quantized triangle index (x / (QUANTIZATION_SCALE - 1.0))
-#   a: quantized chunk index
-# Custom Vertex attributes (may need a custom importer)
-# _TRIANGLE_CENTER (vec3)
-#   xy: center of the triangle this vertex belongs
-#   z: vertex index in triangle (0-2)
-# _CHUNK_CENTER (vec3)
-#   xy: center of the chunk this vertex belongs
-#   z: distance from center of rock to center of chunk
-# Additional rock metadata stored under rock node "extras" as JSON.
-
 # Triangulation
 
 # Desired number of triangles per chunk (chunks can have less).
@@ -860,3 +836,4 @@ gltf_path = os.path.join(OUTPUT_DIRECTORY, "rocks.glb")
 gltf.save(gltf_path)
 
 print('Created GLTF file at: "%s"' % gltf_path)
+
