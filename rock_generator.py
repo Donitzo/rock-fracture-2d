@@ -26,15 +26,17 @@ OUTPUT_DIRECTORY = "./"
 # index = floor(color * QUANTIZATION_SCALE + 0.5)
 QUANTIZATION_SCALE = 4096
 # The number of angular visibility segments to save in the rock metadata, useful for occlusion tests
-VISIBILITY_SEGMENTS = 32
+VISIBILITY_SEGMENTS = 16
 # Whether to create summary plots
 CREATE_SUMMARY_PLOTS = True
+# If non-zero, will cut and mark the outer outline as outline triangles
+OUTLINE_THICKNESS = 0.015
 
 # GLTF model
 # Standard Vertex attributes:
 # POSITION (vec3)
 #   xy: vertex position in rock-local space (around center)
-#   z: 0.0
+#   z: outline vertex if >= 0.1
 # NORMAL (vec3)
 #   xy: 2D corner normal
 #   z: normalized angle around rock (0–1)
@@ -49,8 +51,9 @@ CREATE_SUMMARY_PLOTS = True
 # _TRIANGLE_CENTER (vec3)
 #   xy: center of the triangle this vertex belongs
 #   z: vertex index in triangle (0-2)
-# _CHUNK_CENTER (vec2)
+# _CHUNK_CENTER (vec3)
 #   xy: center of the chunk this vertex belongs
+#   z: distance from center of rock to center of chunk
 # Additional rock metadata stored under rock node "extras" as JSON.
 
 # Triangulation
@@ -105,8 +108,6 @@ RANDOM_REPULSION_STRENGTH = 0.8
 
 # Find the smallest angle in a polygon
 def polygon_min_angle(polygon):
-    if not isinstance(polygon, Polygon):
-        return 0.0
     coords = np.asarray(polygon.exterior.coords[:-1])
     min_angle = np.inf
 
@@ -228,13 +229,13 @@ def create_rock(gltf, scene, summary_image_path):
     random_angle = np.random.uniform(0.0, 2.0 * np.pi)
 
     print(
-        "Creating rock with parameters:\n"
-        f"  rough points     : {n_rough_points}\n"
-        f"  rough radius     : {random_rough_radius:.3f}\n"
-        f"  rough angle      : {random_rough_angle:.3f}\n"
-        f"  anisotropy       : {anisotropy:.3f}\n"
-        f"  low noise amp    : {noise_low_amplitude:.3f}\n"
-        f"  high noise scale : {noise_high_scale:.3f}"
+        "Creating rock with parameters\n"
+        f"  rough points        : {n_rough_points}\n"
+        f"  rough radius        : {random_rough_radius:.3f}\n"
+        f"  rough angle         : {random_rough_angle:.3f}\n"
+        f"  anisotropy          : {anisotropy:.3f}\n"
+        f"  low noise amplitude : {noise_low_amplitude:.3f}\n"
+        f"  high noise scale    : {noise_high_scale:.3f}"
     )
 
     attempts = 0
@@ -248,14 +249,14 @@ def create_rock(gltf, scene, summary_image_path):
         rough_points = np.column_stack([radii * np.cos(angles), radii * np.sin(angles) * (1.0 - anisotropy)])
 
         # Center polygon
-        rough_polygon = Polygon(rough_points).buffer(0)
+        rough_polygon = Polygon(rough_points).buffer(0, join_style=2)
         cx, cy = rough_polygon.centroid.coords[0]
         rough_points[:, 0] -= cx
         rough_points[:, 1] -= cy
 
         # Validate polygon
-        rough_polygon = Polygon(rough_points).buffer(0)
-        if rough_polygon.is_empty or isinstance(rough_polygon, MultiPolygon):
+        rough_polygon = Polygon(rough_points).buffer(0, join_style=2)
+        if rough_polygon.is_empty or rough_polygon.geom_type != "Polygon":
             print("\r\033[KAttempt %i: Invalid rough polygon. Retrying..." % attempts, end="", flush=True)
             continue
 
@@ -288,8 +289,8 @@ def create_rock(gltf, scene, summary_image_path):
             )
 
         # Validate polygon
-        fine_polygon = Polygon(fine_points).buffer(0)
-        if fine_polygon.is_empty or isinstance(fine_polygon, MultiPolygon):
+        fine_polygon = Polygon(fine_points).buffer(0, join_style=2)
+        if fine_polygon.is_empty or fine_polygon.geom_type != "Polygon":
             print("\r\033[KAttempt %i: Invalid fine polygon. Retrying..." % attempts, end="", flush=True)
             continue
 
@@ -305,22 +306,22 @@ def create_rock(gltf, scene, summary_image_path):
 
         # Buffer inner polygon for margin checks
         margin = EDGE_MARGIN_SCALE * spacing
-        inner_polygon = fine_polygon.buffer(-margin)
+        margin_polygon = fine_polygon.buffer(-margin)
 
         # Validate polygon
-        if inner_polygon.is_empty or isinstance(inner_polygon, MultiPolygon):
+        if margin_polygon.is_empty or margin_polygon.geom_type != "Polygon":
             print("\r\033[KAttempt %i: Invalid inner polygon. Retrying..." % attempts, end="", flush=True)
             continue
 
         # Prepped geometry
-        inner_prepped = prep(inner_polygon)
-        inner_boundary = inner_polygon.boundary
+        inner_prepped = prep(margin_polygon)
+        inner_boundary = margin_polygon.boundary
 
         # Estimate the number of inner points based on the spacing parameter
-        n_points = max(1, int(inner_polygon.area / (spacing * spacing)))
+        n_points = max(1, int(margin_polygon.area / (spacing * spacing)))
 
         # Seed interior points
-        min_x, min_y, max_x, max_y = inner_polygon.bounds
+        min_x, min_y, max_x, max_y = margin_polygon.bounds
         interior_points = []
         while len(interior_points) < n_points:
             p = np.array([np.random.uniform(min_x, max_x), np.random.uniform(min_y, max_y)])
@@ -466,7 +467,7 @@ def create_rock(gltf, scene, summary_image_path):
             triangle_to_chunk[triangle_to_chunk > kill] -= 1
 
         # Create polygons for all chunks
-        chunk_polygons = [unary_union([triangle_polygons[t] for t in r]) for r in chunks if len(r) > 0]
+        chunk_polygons = [unary_union([triangle_polygons[t] for t in r]) for r in chunks]
 
         # Check if any chunk is too sharp
         too_sharp = [i for i, p in enumerate(chunk_polygons) if polygon_min_angle(p) < MIN_ANGLE]
@@ -474,9 +475,102 @@ def create_rock(gltf, scene, summary_image_path):
             print("\r\033[KAttempt %i: Chunk contains sharp corners. Retrying..." % attempts, end="", flush=True)
             continue
 
+        # Cut triangles by outline band
+        if OUTLINE_THICKNESS > 0.0:
+            outline_polygon = fine_polygon.buffer(-OUTLINE_THICKNESS, join_style=2)
+            outline_band = fine_polygon.difference(outline_polygon)
+
+            if outline_band.is_empty or outline_polygon.is_empty or\
+                outline_band.geom_type != "Polygon" or outline_polygon.geom_type != "Polygon":
+                print("\r\033[KAttempt %i: Invalid outline band. Retrying..." % attempts, end="", flush=True)
+                continue
+
+            new_points = points.tolist()
+            new_tris = []
+            new_chunk_index = {}
+
+            for t_i, tri in enumerate(triangles):
+                tri_polygon = Polygon(points[tri])
+
+                if not tri_polygon.intersects(outline_band):
+                    old_chunk_index = triangle_to_chunk[t_i]
+                    if not old_chunk_index in new_chunk_index:
+                        new_chunk_index[old_chunk_index] = len(new_chunk_index)
+                    chunk_index = new_chunk_index[old_chunk_index]
+
+                    new_tris.append((tri.tolist(), chunk_index, False))
+                    continue
+
+                for polygon, is_outline in [
+                    (tri_polygon.intersection(outline_band), True),
+                    (tri_polygon.difference(outline_band), False),
+                ]:
+                    parts = []
+
+                    if polygon.is_empty:
+                        continue
+
+                    match polygon.geom_type:
+                        case "Polygon":
+                            parts = [polygon]
+                        case "MultiPolygon":
+                            parts = list(polygon.geoms)
+                        case "GeometryCollection":
+                            parts = [
+                                p
+                                for g in polygon.geoms
+                                if g.geom_type in ("Polygon", "MultiPolygon")
+                                for p in (list(g.geoms) if g.geom_type == "MultiPolygon" else [g])
+                            ]
+                        case _:
+                            parts = []
+
+                    for p in parts:
+                        exterior_points = np.asarray(p.exterior.coords[:-1], float)
+                        n = len(exterior_points)
+                        if n < 3:
+                            continue
+                        segments = [(i, (i + 1) % n) for i in range(n)]
+
+                        new_triangles = np.array(tr.triangulate({
+                            "vertices": exterior_points,
+                            "segments": segments,
+                        }, "p")["triangles"])
+
+                        old_chunk_index = triangle_to_chunk[t_i]
+                        if not old_chunk_index in new_chunk_index:
+                            new_chunk_index[old_chunk_index] = len(new_chunk_index)
+                        chunk_index = new_chunk_index[old_chunk_index]
+
+                        for new_tri in new_triangles:
+                            indices = []
+                            for t in new_tri:
+                                indices.append(len(new_points))
+                                new_points.append(exterior_points[t])
+
+                            new_tris.append((indices, chunk_index, is_outline))
+
+            # Update all fields based on the new triangles
+            triangles = np.array([t for t, _, _ in new_tris])
+            triangle_to_chunk = np.array([c for _, c, _ in new_tris])
+            triangle_is_outline = np.array([o for _, _, o in new_tris])
+            points = np.array(new_points)
+            triangle_polygons = [Polygon(points[t]) for t in triangles]
+            chunks = [set() for _ in range(triangle_to_chunk.max() + 1)]
+            for i, c in enumerate(triangle_to_chunk):
+                chunks[c].add(i)
+            chunk_polygons = [unary_union([triangle_polygons[t] for t in r]) for r in chunks]
+        else:
+            triangle_is_outline = np.array([False] * len(triangles))
+
+        # Ensure that every chunk is a consistent segment
+        if not all(not p.is_empty and p.geom_type == "Polygon" for p in chunk_polygons):
+            print("\r\033[KAttempt %i: Chunks are complex. Retrying..." % attempts, end="", flush=True)
+            continue
+
         # Merge and validate the final polygon with all triangles
         final_polygon = unary_union(chunk_polygons)
-        if final_polygon.is_empty or isinstance(final_polygon, MultiPolygon):
+        if final_polygon.is_empty or final_polygon.geom_type != "Polygon":
             print("\r\033[KAttempt %i: Invalid final polygon. Retrying..." % attempts, end="", flush=True)
             continue
         final_boundary = final_polygon.boundary
@@ -501,7 +595,8 @@ def create_rock(gltf, scene, summary_image_path):
         triangle_order.extend(tris_sorted)
         chunk_span.append((c_i, start, len(tris_sorted)))
 
-    triangles = triangles[np.asarray(triangle_order, dtype=int)]
+    triangles = triangles[triangle_order]
+    triangle_is_outline = triangle_is_outline[triangle_order]
 
     # Triangle to chunk lookup
     triangle_to_chunk = np.empty(len(triangles), dtype=int)
@@ -545,7 +640,8 @@ def create_rock(gltf, scene, summary_image_path):
             x, y = points[v_i]
 
             # Save position
-            buffer_position.append([x, y, 0.0])
+            z = 0.1 if triangle_is_outline[t_i] else 0.0
+            buffer_position.append([x, y, z])
 
             # Save 2D edge normal
             p0 = tri_points[(local_i - 1) % 3]
@@ -577,18 +673,31 @@ def create_rock(gltf, scene, summary_image_path):
 
             # Triangle and chunk centers
             buffer_triangle_center.append([tri_center[0], tri_center[1], local_i])
-            cc_x, cc_y = chunk_centers[c_i]
-            buffer_chunk_center.append([cc_x, cc_y])
+            buffer_chunk_center.append([
+                chunk_centers[c_i][0],
+                chunk_centers[c_i][1],
+                np.linalg.norm(chunk_centers[c_i]),
+            ])
 
-    # Find chunk adjacency
+    # Find chunk adjacency by edge
     edge_to_chunk = defaultdict(set)
-    for t_i, tri in enumerate(triangles):
-        c = triangle_to_chunk[t_i]
-        for i in range(3):
-            edge = tuple(sorted((tri[i], tri[(i + 1) % 3])))
-            edge_to_chunk[edge].add(c)
 
+    for t_i, tri in enumerate(triangles):
+        c_i = triangle_to_chunk[t_i]
+
+        for i in range(3):
+            p0 = points[tri[i]]
+            p1 = points[tri[(i + 1) % 3]]
+
+            e0 = (int(round(p0[0] / 1e-6)), int(round(p0[1] / 1e-6)))
+            e1 = (int(round(p1[0] / 1e-6)), int(round(p1[1] / 1e-6)))
+            edge_key = tuple(sorted((e0, e1)))
+
+            edge_to_chunk[edge_key].add(c_i)
+
+    # Build chunk neighbor sets
     chunk_neighbors = [set() for _ in chunks]
+
     for edge_chunks in edge_to_chunk.values():
         if len(edge_chunks) > 1:
             for c_i in edge_chunks:
@@ -597,9 +706,9 @@ def create_rock(gltf, scene, summary_image_path):
     # Get graph order from rock surface
     surface_chunks = set()
 
-    for edge, chunks_on_edge in edge_to_chunk.items():
-        if len(chunks_on_edge) == 1:
-            surface_chunks |= chunks_on_edge
+    for i, polygon in enumerate(chunk_polygons):
+        if polygon.boundary.intersects(final_boundary):
+            surface_chunks.add(i)
 
     chunk_depth = [-1] * len(chunks)
     chunk_queue = deque()
@@ -620,15 +729,32 @@ def create_rock(gltf, scene, summary_image_path):
 
     # Create visibility bins
     chunk_visibility = []
+
     for c_i, center_xy in enumerate(chunk_centers):
         bins = [set() for _ in range(VISIBILITY_SEGMENTS)]
-        for d_i, other_xy in enumerate(chunk_centers):
-            if c_i == d_i:
-                continue
-            dx, dy = (other_xy - center_xy)
-            ang = np.arctan2(dy, dx)
-            b = int((ang + np.pi) / (2.0 * np.pi) * VISIBILITY_SEGMENTS) % VISIBILITY_SEGMENTS
-            bins[b].add(d_i)
+
+        if VISIBILITY_SEGMENTS > 0:
+            for d_i, polygon in enumerate(chunk_polygons):
+                if c_i == d_i:
+                    continue
+
+                angles = []
+
+                for x, y in polygon.exterior.coords:
+                    angles.append(np.arctan2(y - center_xy[1], x - center_xy[0]))
+
+                angles = np.unwrap(np.array(angles))
+
+                b0 = int((angles.min() + np.pi) / (2 * np.pi) * VISIBILITY_SEGMENTS)
+                b1 = int((angles.max() + np.pi) / (2 * np.pi) * VISIBILITY_SEGMENTS)
+
+                if b0 <= b1:
+                    for b in range(b0, b1 + 1):
+                        bins[b % VISIBILITY_SEGMENTS].add(d_i)
+                else:
+                    for b in list(range(b0, VISIBILITY_SEGMENTS)) + list(range(0, b1 + 1)):
+                        bins[b].add(d_i)
+
         chunk_visibility.append([sorted(s) for s in bins])
 
     # Create metadata (for GLTF extras)
@@ -653,7 +779,7 @@ def create_rock(gltf, scene, summary_image_path):
             "TEXCOORD_0": add_accessor(gltf, buffer_uv, VEC2),
             "COLOR_0": add_accessor(gltf, buffer_color, VEC4),
             "_TRIANGLE_CENTER": add_accessor(gltf, buffer_triangle_center, VEC3),
-            "_CHUNK_CENTER": add_accessor(gltf, buffer_chunk_center, VEC2),
+            "_CHUNK_CENTER": add_accessor(gltf, buffer_chunk_center, VEC3),
         },
         mode=4
     )
@@ -664,7 +790,7 @@ def create_rock(gltf, scene, summary_image_path):
     # Create GLTF node
     node = Node()
     node.mesh = mesh_index
-    node.translation = [rock_index * 5.0, 0.0, 0.0]
+    node.translation = [(rock_index % 4) * 4.0, int(rock_index / 4) * 4.0, 0.0]
     node.name = "Rock_%i" % rock_index
     node.extras = {
         "chunk_count": len(chunk_metadata),
@@ -679,13 +805,16 @@ def create_rock(gltf, scene, summary_image_path):
         return
 
     fine_xy = np.asarray(fine_polygon.exterior.coords)
-    inner_xy = np.asarray(inner_polygon.exterior.coords)
+    margin_xy = np.asarray(margin_polygon.exterior.coords)
 
     plt.clf()
     plt.figure(figsize=(7, 7))
 
     plt.plot(fine_xy[:, 0], fine_xy[:, 1], lw=2, alpha=0.3, label="Rock polygon")
-    plt.plot(inner_xy[:, 0], inner_xy[:, 1], lw=1, alpha=0.3, label="Inner margin")
+    plt.plot(margin_xy[:, 0], margin_xy[:, 1], lw=1, alpha=0.3, label="Inner margin")
+    if OUTLINE_THICKNESS > 0.0:
+        outline_xy = np.asarray(outline_polygon.exterior.coords)
+        plt.plot(outline_xy[:, 0], outline_xy[:, 1], lw=1, alpha=0.3, label="Outline")
 
     plt.scatter(points0[n_points:, 0], points0[n_points:, 1], s=6, alpha=0.4, label="Edge points")
     plt.scatter(points[:n_points, 0], points[:n_points, 1], s=6, alpha=0.4, label="Relaxed points")
@@ -708,6 +837,7 @@ def create_rock(gltf, scene, summary_image_path):
 gltf = GLTF2()
 scene = Scene()
 gltf.scenes.append(scene)
+gltf.scene = 0
 
 # Store all binary data in a single buffer
 gltf.buffers.append(Buffer(byteLength=0, uri=""))
@@ -722,7 +852,8 @@ for i in range(ROCK_COUNT):
 # Finalize GLTF buffer
 blob = bytes(gltf._blob)
 gltf.buffers[0].byteLength = len(blob)
-gltf.buffers[0].uri = ("data:application/octet-stream;base64," + base64.b64encode(blob).decode("ascii"))
+gltf.buffers[0].uri = None
+gltf.set_binary_blob(blob)
 
 # Save GLTF file
 gltf_path = os.path.join(OUTPUT_DIRECTORY, "rocks.glb")
