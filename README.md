@@ -4,6 +4,8 @@
 
 ## Description
 
+Generates fractured 2D rocks from arbitrary polygon outlines. Each rock is exported as a GLTF mesh containing chunk metadata suitable for shader-driven destruction effects.
+
 This rock generator was created as a better alternative for Voronoi fracturing polygons. The issue with Voronoi is that it isn't intended to be used for polygons, so you end up with sub-optimal edges. The alternative algorithm I created was to populate and relax a series of triangulation points inside any arbitrary polygon. After triangulation you randomly join the resulting triangles until you get the desired chunk size.
 
 The final rocks are exported as a GLTF model, with each rock represented as its own mesh. This allows rock destruction to be driven via shaders, rather than relying on a large number of small objects.
