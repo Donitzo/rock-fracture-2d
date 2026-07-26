@@ -74,3 +74,5 @@ A lot of different metadata are included as both `.JSON` data per rock mesh and 
 ### Additional Metadata
 
 Additional rock metadata is stored as JSON under the rock node’s `extras` field (userData in Three.js). This metadata includes chunk centers, graph adjacency, graph depth, chunk visibility.
+
+`chunk_visibility` divides the view around each chunk into angular segments. Each segment lists chunks that may obstruct that chunk from that direction. This can be used to choose exposed parts of a rock to attack without performing runtime geometry tests.
